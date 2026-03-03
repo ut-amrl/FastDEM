@@ -41,6 +41,21 @@ void validate(PostProcess& cfg) {
   warn_clamp_min("inpainting.min_valid_neighbors",
                  cfg.inpainting.min_valid_neighbors, 1);
 
+  // Spatial smoothing
+  if (cfg.spatial_smoothing.kernel_size <= 0) {
+    spdlog::warn("[PostProcess] spatial_smoothing.kernel_size ({}) must be > 0, clamping to {}",
+                 cfg.spatial_smoothing.kernel_size, 3);
+    cfg.spatial_smoothing.kernel_size = 3;
+  }
+  if (cfg.spatial_smoothing.kernel_size % 2 == 0) {
+    spdlog::warn("[PostProcess] spatial_smoothing.kernel_size ({}) should be odd, incrementing",
+                 cfg.spatial_smoothing.kernel_size);
+    cfg.spatial_smoothing.kernel_size += 1;
+  }
+  warn_clamp_min("spatial_smoothing.min_valid_neighbors",
+                 cfg.spatial_smoothing.min_valid_neighbors, 1);
+  if (cfg.spatial_smoothing.layer.empty()) cfg.spatial_smoothing.layer = "elevation";
+
   // Uncertainty fusion
   warn_clamp_positive("uncertainty_fusion.search_radius",
                       cfg.uncertainty_fusion.search_radius, 0.15f);
@@ -91,6 +106,16 @@ PostProcess parsePostProcess(const YAML::Node& root) {
     detail::load(n, "enabled", cfg.inpainting.enabled);
     detail::load(n, "max_iterations", cfg.inpainting.max_iterations);
     detail::load(n, "min_valid_neighbors", cfg.inpainting.min_valid_neighbors);
+    detail::load(n, "fill_nan", cfg.inpainting.fill_nan);
+    detail::load(n, "fill_nan_value", cfg.inpainting.fill_nan_value);
+  }
+
+  if (auto n = root["spatial_smoothing"]) {
+    detail::load(n, "enabled", cfg.spatial_smoothing.enabled);
+    detail::load(n, "layer", cfg.spatial_smoothing.layer);
+    detail::load(n, "kernel_size", cfg.spatial_smoothing.kernel_size);
+    detail::load(n, "min_valid_neighbors",
+                 cfg.spatial_smoothing.min_valid_neighbors);
   }
 
   if (auto n = root["uncertainty_fusion"]) {

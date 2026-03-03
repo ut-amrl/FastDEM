@@ -43,6 +43,12 @@ struct NodeConfig {
   config::PostProcess postprocess;
 
   struct Visualization {
+    struct GridMapCrop {
+      bool enabled{false};
+      double width{10.0};   // [m]
+      double height{10.0};  // [m]
+    } gridmap_crop;
+
     struct FeatureExtraction {
       struct Normals {
         float arrow_length{0.15f};
@@ -93,6 +99,11 @@ struct NodeConfig {
 
     // Visualization
     if (auto n = yaml["visualization"]) {
+      if (auto gc = n["gridmap_crop"]) {
+        read(gc, "enabled", cfg.visualization.gridmap_crop.enabled);
+        read(gc, "width", cfg.visualization.gridmap_crop.width);
+        read(gc, "height", cfg.visualization.gridmap_crop.height);
+      }
       if (auto fe = n["feature_extraction"]) {
         if (auto nm = fe["normals"]) {
           read(nm, "arrow_length", cfg.visualization.feature_extraction.normals.arrow_length);

@@ -25,6 +25,8 @@ struct PointFilter {
   float z_max = std::numeric_limits<float>::max();
   float range_min = 0.0f;
   float range_max = std::numeric_limits<float>::max();
+  // Optional voxel downsampling (0 = disabled).
+  float voxel_leaf_size = 0.0f;
 };
 
 }  // namespace config

@@ -3,6 +3,14 @@ inpainting:
   enabled: false
   max_iterations: 3
   min_valid_neighbors: 2
+  fill_nan: false
+  fill_nan_value: 0.0
+
+spatial_smoothing:
+  enabled: false
+  layer: "elevation"
+  kernel_size: 3
+  min_valid_neighbors: 5
 
 uncertainty_fusion:
   enabled: true

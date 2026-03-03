@@ -10,16 +10,33 @@ from launch_ros.substitutions import FindPackageShare
 
 def _launch_setup(context):
     global_mapping = LaunchConfiguration('global_mapping').perform(context) == 'true'
+    config_name = LaunchConfiguration('config_name').perform(context).strip()
     input_scan = LaunchConfiguration('input_scan').perform(context)
+    extra_nodes = []
 
     # Package path
     pkg_share = FindPackageShare('fastdem_ros2')
 
     # Config file (single superset YAML — same format as ROS1)
-    config_name = 'global_mapping.yaml' if global_mapping else 'local_mapping.yaml'
-    rviz_name = 'fastdem_global.rviz' if global_mapping else 'fastdem_local.rviz'
+    if not config_name:
+        config_name = 'global_mapping.yaml' if global_mapping else 'local_mapping.yaml'
+    rviz_name = 'fastdem_global.rviz' if config_name == 'global_mapping.yaml' else 'fastdem_local.rviz'
     config_file = PathJoinSubstitution([pkg_share, 'config', config_name])
     rviz_config = PathJoinSubstitution([pkg_share, 'launch', 'rviz', rviz_name])
+
+    if config_name == 'alphatruck.yaml':
+        extra_nodes.append(
+            Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                name='fastdem_livox_to_sensor_tf',
+                arguments=[
+                    '0', '0', '0',
+                    '0', '0.24958208303518914', '0',
+                    'sensor', 'livox_frame/base_link',
+                ],
+            )
+        )
 
     # Node parameters
     node_params = {'config_file': config_file}
@@ -44,7 +61,7 @@ def _launch_setup(context):
         condition=IfCondition(LaunchConfiguration('rviz')),
     )
 
-    return [fastdem_node, rviz_node]
+    return [*extra_nodes, fastdem_node, rviz_node]
 
 
 def generate_launch_description():
@@ -52,6 +69,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'global_mapping', default_value='false',
             description='Enable global (fixed-origin) mapping mode'),
+        DeclareLaunchArgument(
+            'config_name', default_value='',
+            description='Config file under fastdem_ros2/config (empty = choose from global_mapping)'),
         DeclareLaunchArgument(
             'input_scan', default_value='',
             description='Override input topic (empty = use config)'),

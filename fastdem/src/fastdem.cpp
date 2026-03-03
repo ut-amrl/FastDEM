@@ -168,12 +168,17 @@ PointCloud FastDEM::preprocessScan(const PointCloud& cloud,
   const auto& z_max = cfg_.point_filter.z_max;
   const auto& range_min = cfg_.point_filter.range_min;
   const auto& range_max = cfg_.point_filter.range_max;
+  const auto& voxel_leaf_size = cfg_.point_filter.voxel_leaf_size;
 
   // Compute covariances in sensor frame, then transform + filter
   PointCloud points = sensor_model_->computeCovariances(cloud);
   points = nanopcl::transformCloud(std::move(points), T_base_sensor);
   points = nanopcl::filters::cropRange(std::move(points), range_min, range_max);
   points = nanopcl::filters::cropZ(std::move(points), z_min, z_max);
+  if (voxel_leaf_size > 1e-6f) {
+    points = nanopcl::filters::voxelGrid(std::move(points), voxel_leaf_size,
+                                         nanopcl::filters::VoxelMode::CENTROID);
+  }
 
   // Transform to map frame
   points = nanopcl::transformCloud(std::move(points), T_world_base,

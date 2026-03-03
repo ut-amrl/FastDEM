@@ -1,0 +1,119 @@
+# FastDEM config for Alphatruck with SuperOdometry + Livox Mid360
+#
+# SuperOdometry stack in this workspace:
+#   - Launch: src/SuperOdom/super_odometry/launch/livox_mid360_alphatruck.launch.py
+#   - Raw LiDAR input: /livox/lidar
+#   - Raw IMU input: /vectornav/imu
+#   - Raw cloud for FastDEM: /livox/lidar
+#   - SuperOdometry remains the reference for TF and sensor mounting params
+#   - Raw cloud frame: "livox_frame/base_link"
+#   - TF used by FastDEM: map -> sensor (broadcast by imu_preintegration_node)
+#
+# In SuperOdometry's AlphaTruck config, the raw Livox is pitched -14.3 deg
+# forward (feature_extraction_node.lidar_mount_pitch_deg: -14.3). That pitch is
+# removed in the FastDEM launch by publishing a static TF:
+#   sensor <- livox_frame/base_link
+# with +14.3 deg pitch, matching the same leveling that SuperOdometry applies
+# internally via level_R = mount_R.transpose().
+#
+# Mapping mode remains local, so the elevation map follows the robot while being
+# published in the world frame named by tf.map_frame ("map" below).
+
+topics:
+  # Use the raw Livox stream directly.
+  input_scans: ["/livox/lidar"]
+  publish_rate: 10.0
+  post_process_rate: 10.0
+
+tf:
+  base_frame: "sensor"
+  map_frame: "map"
+  max_wait_time: 0.1   # [sec]
+  max_stale_time: 0.1  # [sec]
+
+map:
+  width: 20.0       # [m]
+  height: 20.0      # [m]
+  resolution: 0.2   # [m/cell]
+
+point_filter:
+  z_min: -5.0       # [m] below sensor — allow ground points
+  z_max: 5.0        # [m] above sensor
+  range_min: 0.5    # [m]
+  range_max: 8.0   # [m]
+  voxel_leaf_size: 0.4  # [m] downsample for speed (increase to go faster)
+
+logger:
+  level: "info"
+
+# ─── Mapping Pipeline ───────────────────────────────
+mapping:
+  mode: "local"
+  type: "kalman_filter"
+  kalman:
+    min_variance: 0.0001
+    max_variance: 0.01
+    process_noise: 0.0
+  p2:
+    dn0: 0.0
+    dn1: 0.16
+    dn2: 0.50
+    dn3: 0.84
+    dn4: 1.0
+    elevation_marker: 3
+    max_sample_count: 0
+
+sensor_model:
+  type: "lidar"
+  lidar:
+    range_noise: 0.05    # [m] Livox Mid360 range noise
+    angular_noise: 0.002 # [rad]
+
+# ─── Post-processing ────────────────────────────────
+raycasting:
+  enabled: true
+  height_conflict_threshold: 0.1
+  log_odds_observed: 0.4
+  log_odds_ghost: 0.2
+  log_odds_max: 2.0
+  clear_threshold: -1.0
+
+inpainting:
+  enabled: true
+  max_iterations: 20
+  min_valid_neighbors: 4
+  fill_nan: true
+  fill_nan_value: -0.34   # [m] set to vehicle height if you want unknown cells treated as obstacles
+
+# median blur
+spatial_smoothing:
+  enabled: true
+  layer: "elevation"
+  kernel_size: 5
+  min_valid_neighbors: 4
+
+uncertainty_fusion:
+  enabled: false
+  search_radius: 0.15
+  spatial_sigma: 0.05
+  quantile_lower: 0.01
+  quantile_upper: 0.99
+  min_valid_neighbors: 3
+
+feature_extraction:
+  enabled: false
+  analysis_radius: 0.3
+  min_valid_neighbors: 4
+  step_lower_percentile: 0.05
+  step_upper_percentile: 0.95
+
+# ─── Visualization ──────────────────────────────────
+visualization:
+  gridmap_crop:
+    enabled: true
+    width: 10.0    # [m]
+    height: 10.0   # [m]
+  feature_extraction:
+    normals:
+      arrow_length: 0.15
+      stride: 1

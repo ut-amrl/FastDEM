@@ -19,7 +19,8 @@
 namespace fastdem {
 
 void applyInpainting(ElevationMap& map, int max_iterations,
-                     int min_valid_neighbors, bool inplace) {
+                     int min_valid_neighbors, bool inplace, bool fill_nan,
+                     float fill_nan_value) {
   const char* output = inplace ? layer::elevation : layer::elevation_inpainted;
 
   // Ensure output layer exists
@@ -63,6 +64,13 @@ void applyInpainting(ElevationMap& map, int max_iterations,
 
     inpainted = buffer;
     if (!changed) break;
+  }
+
+  if (fill_nan) {
+    for (auto cell : map.cells()) {
+      float& v = inpainted(cell.index);
+      if (!std::isfinite(v)) v = fill_nan_value;
+    }
   }
 }
 

@@ -89,6 +89,7 @@ Config parse(const YAML::Node& root) {
     load(n, "z_max", cfg.point_filter.z_max);
     load(n, "range_min", cfg.point_filter.range_min);
     load(n, "range_max", cfg.point_filter.range_max);
+    load(n, "voxel_leaf_size", cfg.point_filter.voxel_leaf_size);
   }
 
   // Raycasting (log-odds ghost removal)

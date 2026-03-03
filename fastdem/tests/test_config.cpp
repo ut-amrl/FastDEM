@@ -230,6 +230,13 @@ TEST(PostProcessLoadTest, AllFieldsParsed) {
       "  enabled: true\n"
       "  max_iterations: 5\n"
       "  min_valid_neighbors: 3\n"
+      "  fill_nan: true\n"
+      "  fill_nan_value: 1.2\n"
+      "spatial_smoothing:\n"
+      "  enabled: true\n"
+      "  layer: elevation\n"
+      "  kernel_size: 5\n"
+      "  min_valid_neighbors: 7\n"
       "uncertainty_fusion:\n"
       "  enabled: true\n"
       "  search_radius: 0.2\n"
@@ -247,6 +254,13 @@ TEST(PostProcessLoadTest, AllFieldsParsed) {
   EXPECT_TRUE(cfg.inpainting.enabled);
   EXPECT_EQ(cfg.inpainting.max_iterations, 5);
   EXPECT_EQ(cfg.inpainting.min_valid_neighbors, 3);
+  EXPECT_TRUE(cfg.inpainting.fill_nan);
+  EXPECT_FLOAT_EQ(cfg.inpainting.fill_nan_value, 1.2f);
+
+  EXPECT_TRUE(cfg.spatial_smoothing.enabled);
+  EXPECT_EQ(cfg.spatial_smoothing.layer, "elevation");
+  EXPECT_EQ(cfg.spatial_smoothing.kernel_size, 5);
+  EXPECT_EQ(cfg.spatial_smoothing.min_valid_neighbors, 7);
 
   EXPECT_TRUE(cfg.uncertainty_fusion.enabled);
   EXPECT_FLOAT_EQ(cfg.uncertainty_fusion.search_radius, 0.2f);
@@ -265,6 +279,7 @@ TEST(PostProcessLoadTest, EmptyYamlUsesDefaults) {
   auto cfg = config::loadPostProcess(path);
 
   EXPECT_FALSE(cfg.inpainting.enabled);
+  EXPECT_FALSE(cfg.spatial_smoothing.enabled);
   EXPECT_FALSE(cfg.uncertainty_fusion.enabled);
   EXPECT_FALSE(cfg.feature_extraction.enabled);
 }
@@ -328,6 +343,17 @@ TEST(PostProcessValidationTest, NegativeMinNeighborsClamped) {
   auto cfg = config::loadPostProcess(path);
   EXPECT_GE(cfg.inpainting.max_iterations, 1);
   EXPECT_GE(cfg.inpainting.min_valid_neighbors, 1);
+}
+
+TEST(PostProcessValidationTest, SpatialSmoothingEvenKernelClampedToOdd) {
+  auto path = writeTempYaml(
+      "spatial_smoothing:\n"
+      "  enabled: true\n"
+      "  kernel_size: 4\n",
+      "test_pp_even_kernel.yaml");
+  auto cfg = config::loadPostProcess(path);
+  EXPECT_EQ(cfg.spatial_smoothing.kernel_size % 2, 1);
+  EXPECT_GE(cfg.spatial_smoothing.kernel_size, 1);
 }
 
 // ─── Validation: Non-Fatal Clamping ──────────────────────────────────────────

@@ -31,9 +31,12 @@ constexpr auto elevation_inpainted = "elevation_inpainted";
  * @param min_valid_neighbors Minimum valid neighbors to fill a cell (default: 2)
  * @param inplace If true, writes to elevation layer directly.
  *                If false, writes to elevation_inpainted layer (original unchanged).
+ * @param fill_nan If true, fills any remaining NaNs with fill_nan_value at the end.
+ * @param fill_nan_value Value to assign to remaining NaNs (e.g. vehicle height [m]).
  */
 void applyInpainting(ElevationMap& map, int max_iterations = 3,
-                     int min_valid_neighbors = 2, bool inplace = false);
+                     int min_valid_neighbors = 2, bool inplace = false,
+                     bool fill_nan = false, float fill_nan_value = 0.0f);
 
 }  // namespace fastdem
 

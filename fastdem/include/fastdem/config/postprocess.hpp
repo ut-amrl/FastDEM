@@ -27,6 +27,16 @@ struct Inpainting {
   bool enabled = false;
   int max_iterations = 3;
   int min_valid_neighbors = 2;
+  bool fill_nan = false;
+  float fill_nan_value = 0.0f;
+};
+
+/// Spatial median filter ("median blur") for a map layer.
+struct SpatialSmoothing {
+  bool enabled = false;
+  std::string layer = "elevation";
+  int kernel_size = 3;
+  int min_valid_neighbors = 5;
 };
 
 /// Spatial fusion of estimator bounds (inverse-range weighted ECDF).
@@ -51,6 +61,7 @@ struct FeatureExtraction {
 /// Post-processing configuration aggregate.
 struct PostProcess {
   Inpainting inpainting;
+  SpatialSmoothing spatial_smoothing;
   UncertaintyFusion uncertainty_fusion;
   FeatureExtraction feature_extraction;
 };

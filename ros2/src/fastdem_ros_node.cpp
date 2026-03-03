@@ -3,12 +3,15 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <fastdem/bridge/ros2.hpp>
 #include <fastdem/fastdem.hpp>
 #include <fastdem/postprocess/feature_extraction.hpp>
 #include <fastdem/postprocess/inpainting.hpp>
+#include <fastdem/postprocess/spatial_smoothing.hpp>
 #include <fastdem/postprocess/uncertainty_fusion.hpp>
 #include <memory>
+#include <nanogrid/SubmapGeometry.hpp>
 #include <nanopcl/bridge/ros2.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -16,6 +19,7 @@
 #include <std_srvs/srv/trigger.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
+#include <std_msgs/msg/float32_multi_array.hpp>
 
 #include "fastdem_ros/parameters.hpp"
 #include "fastdem_ros/tf_bridge.hpp"
@@ -25,6 +29,81 @@ namespace fastdem::ros2 {
 using fastdem::ElevationMap;
 using fastdem::FastDEM;
 using fastdem::PointCloud;
+
+static grid_map_msgs::msg::GridMap toGridMapCropped(
+    const ElevationMap& map, const nanogrid::Position& center,
+    const nanogrid::Length& length) {
+  using GridMapMsg = grid_map_msgs::msg::GridMap;
+  using FloatArray = std_msgs::msg::Float32MultiArray;
+
+  bool ok = false;
+  nanogrid::SubmapGeometry geom(map, center, length, ok);
+  if (!ok) return {};
+
+  const auto sub_start = geom.getStartIndex();
+  const auto sub_size = geom.getSize();
+  const auto& sub_center = geom.getPosition();
+  const auto& sub_length = geom.getLength();
+
+  GridMapMsg msg;
+  msg.header.stamp = fastdem::ros2::detail::toStamp(map.getTimestamp());
+  msg.header.frame_id = map.getFrameId();
+
+  const double res = map.getResolution();
+  msg.info.resolution = res;
+  msg.info.length_x = sub_length.x();
+  msg.info.length_y = sub_length.y();
+  msg.info.pose.position.x = sub_center.x();
+  msg.info.pose.position.y = sub_center.y();
+  msg.info.pose.position.z = 0.0;
+  msg.info.pose.orientation.w = 1.0;
+  msg.info.pose.orientation.x = 0.0;
+  msg.info.pose.orientation.y = 0.0;
+  msg.info.pose.orientation.z = 0.0;
+
+  for (const auto& l : map.getLayers()) {
+    if (!fastdem::layer::isInternal(l)) msg.layers.push_back(l);
+  }
+  msg.basic_layers = {fastdem::layer::elevation};
+
+  const auto size = map.getSize();
+  const Eigen::Index rows = size(0);
+  const Eigen::Index cols = size(1);
+  const Eigen::Index sub_rows = sub_size(0);
+  const Eigen::Index sub_cols = sub_size(1);
+
+  for (const auto& layer_name : msg.layers) {
+    FloatArray data_array;
+
+    data_array.layout.dim.resize(2);
+    data_array.layout.dim[0].label = "column_index";
+    data_array.layout.dim[0].size = sub_rows;
+    data_array.layout.dim[0].stride = sub_rows * sub_cols;
+    data_array.layout.dim[1].label = "row_index";
+    data_array.layout.dim[1].size = sub_cols;
+    data_array.layout.dim[1].stride = sub_cols;
+
+    const auto& layer_data = map.get(layer_name);
+    data_array.data.resize(static_cast<size_t>(sub_rows * sub_cols));
+
+    size_t idx = 0;
+    for (Eigen::Index j = 0; j < sub_cols; ++j) {
+      const Eigen::Index c = (sub_start(1) + j) % cols;
+      for (Eigen::Index i = 0; i < sub_rows; ++i) {
+        const Eigen::Index r = (sub_start(0) + i) % rows;
+        data_array.data[idx++] = layer_data(r, c);
+      }
+    }
+
+    msg.data.push_back(std::move(data_array));
+  }
+
+  // Export as a non-wrapped submap (start indices at 0)
+  msg.outer_start_index = 0;
+  msg.inner_start_index = 0;
+
+  return msg;
+}
 
 class MappingNode : public rclcpp::Node {
  public:
@@ -105,11 +184,14 @@ class MappingNode : public rclcpp::Node {
     pub_rasterized_   = this->create_publisher<Cloud>("~/scan/rasterized", 1);
     pub_map_          = this->create_publisher<Cloud>("~/mapping/cloud", 1);
     pub_gridmap_      = this->create_publisher<GridMapMsg>("~/mapping/gridmap", 1);
+    pub_gridmap_cropped_ = this->create_publisher<GridMapMsg>("~/mapping/gridmap_cropped", 1);
     pub_boundary_     = this->create_publisher<Marker>("~/mapping/boundary", 1);
     pub_global_map_   = this->create_publisher<Cloud>("~/mapping/cloud_global", 1);
 
     pub_post_map_     = this->create_publisher<Cloud>("~/postprocess/cloud", 1);
     pub_post_gridmap_ = this->create_publisher<GridMapMsg>("~/postprocess/gridmap", 1);
+    pub_post_gridmap_cropped_ =
+        this->create_publisher<GridMapMsg>("~/postprocess/gridmap_cropped", 1);
     pub_normals_      = this->create_publisher<MarkerArray>("~/postprocess/normals", 1);
 
     auto to_ms = [](double rate) {
@@ -150,25 +232,25 @@ class MappingNode : public rclcpp::Node {
   }
 
   void runPostProcessCallback(const TriggerRequest, TriggerResponse res) {
-    runPostProcess(true, true, true);
+    runPostProcess(true, true, true, true);
     res->success = true;
     res->message = "Post-processing complete";
   }
 
   void runInpaintingCallback(const TriggerRequest, TriggerResponse res) {
-    runPostProcess(false, true, false);
+    runPostProcess(false, true, false, false);
     res->success = true;
     res->message = "Inpainting complete";
   }
 
   void runUncertaintyFusionCallback(const TriggerRequest, TriggerResponse res) {
-    runPostProcess(true, false, false);
+    runPostProcess(true, false, false, false);
     res->success = true;
     res->message = "Uncertainty fusion complete";
   }
 
   void runFeatureExtractionCallback(const TriggerRequest, TriggerResponse res) {
-    runPostProcess(false, false, true);
+    runPostProcess(false, false, true, false);
     res->success = true;
     res->message = "Feature extraction complete";
   }
@@ -181,7 +263,8 @@ class MappingNode : public rclcpp::Node {
       spdlog::info("First scan received. Mapping started...");
       const bool has_postproc = cfg_.postprocess.uncertainty_fusion.enabled ||
                                 cfg_.postprocess.inpainting.enabled ||
-                                cfg_.postprocess.feature_extraction.enabled;
+                                cfg_.postprocess.feature_extraction.enabled ||
+                                cfg_.postprocess.spatial_smoothing.enabled;
       if (has_postproc && cfg_.topics.post_process_rate > 0.0) {
         auto period =
             std::chrono::duration<double>(1.0 / cfg_.topics.post_process_rate);
@@ -202,10 +285,11 @@ class MappingNode : public rclcpp::Node {
   void postProcessCallback() {
     const auto& pp = cfg_.postprocess;
     runPostProcess(pp.uncertainty_fusion.enabled, pp.inpainting.enabled,
-                   pp.feature_extraction.enabled);
+                   pp.feature_extraction.enabled, pp.spatial_smoothing.enabled);
   }
 
-  void runPostProcess(bool do_uf, bool do_inpainting, bool do_fe) {
+  void runPostProcess(bool do_uf, bool do_inpainting, bool do_fe,
+                      bool do_smoothing) {
     ElevationMap map_copy;
     {
       std::shared_lock lock(map_mutex_);
@@ -219,12 +303,17 @@ class MappingNode : public rclcpp::Node {
     if (do_uf) applyUncertaintyFusion(map_copy, pp.uncertainty_fusion);
     if (do_inpainting)
       applyInpainting(map_copy, pp.inpainting.max_iterations,
-                      pp.inpainting.min_valid_neighbors, /*inplace=*/true);
+                      pp.inpainting.min_valid_neighbors, /*inplace=*/true,
+                      pp.inpainting.fill_nan, pp.inpainting.fill_nan_value);
     if (do_fe)
       applyFeatureExtraction(map_copy, pp.feature_extraction.analysis_radius,
                              pp.feature_extraction.min_valid_neighbors,
                              pp.feature_extraction.step_lower_percentile,
                              pp.feature_extraction.step_upper_percentile);
+    if (do_smoothing)
+      applySpatialSmoothing(map_copy, pp.spatial_smoothing.layer,
+                            pp.spatial_smoothing.kernel_size,
+                            pp.spatial_smoothing.min_valid_neighbors);
 
     // Compute derived layer for visualization
     nanogrid::Matrix range_mat =
@@ -237,6 +326,20 @@ class MappingNode : public rclcpp::Node {
     if (pub_post_gridmap_->get_subscription_count() > 0 &&
         cfg_.pipeline.mapping.mode != fastdem::MappingMode::GLOBAL)
       pub_post_gridmap_->publish(ros2::toGridMap(map_copy));
+    if (cfg_.visualization.gridmap_crop.enabled &&
+        pub_post_gridmap_cropped_->get_subscription_count() > 0) {
+      nanogrid::Position center = map_copy.getPosition();
+      if (auto pose = tf_->getPoseAt(map_copy.getTimestamp())) {
+        center = nanogrid::Position(pose->translation().x(), pose->translation().y());
+      }
+      const double min_len = map_copy.getResolution();
+      const double w = std::clamp(cfg_.visualization.gridmap_crop.width, min_len,
+                                  map_copy.getLength().x());
+      const double h = std::clamp(cfg_.visualization.gridmap_crop.height, min_len,
+                                  map_copy.getLength().y());
+      pub_post_gridmap_cropped_->publish(
+          toGridMapCropped(map_copy, center, nanogrid::Length(w, h)));
+    }
     if (pub_normals_->get_subscription_count() > 0 && do_fe) {
       const auto& nm = cfg_.visualization.feature_extraction.normals;
       pub_normals_->publish(
@@ -251,12 +354,17 @@ class MappingNode : public rclcpp::Node {
     const bool want_cloud = pub_map_->get_subscription_count() > 0;
     const bool want_gridmap =
         pub_gridmap_->get_subscription_count() > 0 && !is_global;
+    const bool want_gridmap_cropped =
+        cfg_.visualization.gridmap_crop.enabled &&
+        pub_gridmap_cropped_->get_subscription_count() > 0;
     const bool want_boundary = pub_boundary_->get_subscription_count() > 0;
-    if (!want_cloud && !want_gridmap && !want_boundary) return;
+    if (!want_cloud && !want_gridmap && !want_gridmap_cropped && !want_boundary)
+      return;
 
     std::shared_lock lock(map_mutex_);
     if (want_cloud) publishMapCloud();
     if (want_gridmap) publishGridMap();
+    if (want_gridmap_cropped) publishGridMapCropped();
     if (want_boundary) publishMapBoundary();
   }
 
@@ -280,6 +388,22 @@ class MappingNode : public rclcpp::Node {
   }
 
   void publishGridMap() { pub_gridmap_->publish(ros2::toGridMap(map_)); }
+
+  void publishGridMapCropped() {
+    const auto& crop = cfg_.visualization.gridmap_crop;
+    nanogrid::Position center = map_.getPosition();
+
+    // If we have pose at map timestamp, center the crop around the robot.
+    if (auto pose = tf_->getPoseAt(map_.getTimestamp())) {
+      center = nanogrid::Position(pose->translation().x(), pose->translation().y());
+    }
+
+    const double min_len = map_.getResolution();
+    const double w = std::clamp(crop.width, min_len, map_.getLength().x());
+    const double h = std::clamp(crop.height, min_len, map_.getLength().y());
+    const nanogrid::Length len(w, h);
+    pub_gridmap_cropped_->publish(toGridMapCropped(map_, center, len));
+  }
 
   void publishMapBoundary() {
     pub_boundary_->publish(ros2::toMapBoundary(map_));
@@ -320,6 +444,7 @@ class MappingNode : public rclcpp::Node {
     if (pp.uncertainty_fusion.enabled) postproc += "uncertainty_fusion, ";
     if (pp.inpainting.enabled) postproc += "inpainting, ";
     if (pp.feature_extraction.enabled) postproc += "feature_extraction, ";
+    if (pp.spatial_smoothing.enabled) postproc += "spatial_smoothing, ";
     if (!postproc.empty())
       postproc.erase(postproc.size() - 2);
     else
@@ -370,10 +495,12 @@ class MappingNode : public rclcpp::Node {
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr    pub_rasterized_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr    pub_map_;
   rclcpp::Publisher<grid_map_msgs::msg::GridMap>::SharedPtr      pub_gridmap_;
+  rclcpp::Publisher<grid_map_msgs::msg::GridMap>::SharedPtr      pub_gridmap_cropped_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr  pub_boundary_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr    pub_global_map_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr    pub_post_map_;
   rclcpp::Publisher<grid_map_msgs::msg::GridMap>::SharedPtr      pub_post_gridmap_;
+  rclcpp::Publisher<grid_map_msgs::msg::GridMap>::SharedPtr      pub_post_gridmap_cropped_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_normals_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_reset_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_postprocess_;

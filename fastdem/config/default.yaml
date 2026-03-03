@@ -21,6 +21,7 @@ point_filter:
   z_max: 2.0               # [m] max height in base frame
   range_min: 0.5            # [m] min range from sensor
   range_max: 20.0           # [m] max range from sensor
+  voxel_leaf_size: 0.0      # [m] voxel downsample leaf size (0 = disabled)
 
 # Sensor uncertainty model (Σ_sensor → σ_z²)
 sensor_model:
