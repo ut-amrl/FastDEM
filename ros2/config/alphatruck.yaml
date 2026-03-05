@@ -37,10 +37,10 @@ map:
   resolution: 0.2   # [m/cell]
 
 point_filter:
-  z_min: -5.0       # [m] below sensor — allow ground points
-  z_max: 5.0        # [m] above sensor
+  z_min: -2.0       # [m] below sensor — allow ground points
+  z_max: 2.0        # [m] above sensor
   range_min: 0.5    # [m]
-  range_max: 8.0   # [m]
+  range_max: 5.0   # [m]
   voxel_leaf_size: 0.4  # [m] downsample for speed (increase to go faster)
 
 logger:
@@ -82,7 +82,7 @@ inpainting:
   enabled: true
   max_iterations: 20
   min_valid_neighbors: 4
-  fill_nan: true
+  fill_nan: false
   fill_nan_value: -0.34   # [m] set to vehicle height if you want unknown cells treated as obstacles
 
 # median blur
@@ -90,7 +90,7 @@ spatial_smoothing:
   enabled: true
   layer: "elevation"
   kernel_size: 5
-  min_valid_neighbors: 4
+  min_valid_neighbors: 3
 
 uncertainty_fusion:
   enabled: false
