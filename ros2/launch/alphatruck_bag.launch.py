@@ -35,10 +35,11 @@ def generate_launch_description():
             name='fastdem_livox_to_sensor_tf',
             arguments=[
                 '0', '0', '0',
-                '0', '0.24958208303518914', '0',
-                'sensor', 'livox_frame/base_link',
+                '0', '0', '0',
+                'sensor', 'base_link',
             ],
             # condition=IfCondition(LaunchConfiguration('publish_livox_static_tf')),
+            parameters=[{'use_sim_time': use_sim_time}],
         ),
 
         Node(
