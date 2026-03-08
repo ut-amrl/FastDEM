@@ -27,8 +27,8 @@ def generate_launch_description():
             name='fastdem_livox_to_sensor_tf',
             arguments=[
                 '0', '0', '0',
-                '0', '0.24958208303518914', '0',
-                'sensor', 'livox_frame/base_link',
+                '0', '0', '0',
+                'sensor', 'base_link',
             ],
         ),
 
@@ -38,7 +38,7 @@ def generate_launch_description():
             name='fastdem',
             output='screen',
             parameters=[{
-                'use_tim_time': True,
+                'use_sim_time': False,
                 'config_file': config_file,
                 'input_scan': LaunchConfiguration('input_scan'),
             }],
